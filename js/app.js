@@ -32,7 +32,7 @@ function getProxyUrl(url) {
     return PROXY_SERVICES[selectedProxy].url(url);
 }
 
-function generatePreview() {
+async function generatePreview() {
     const urlInput = document.getElementById('urlInput');
     const url = urlInput.value.trim();
 
@@ -71,50 +71,38 @@ function generatePreview() {
 
     applyBackgroundType();
 
-    const proxyUrl = getProxyUrl(url);
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('allow', 'cross-origin-isolated');
-    iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups');
-    iframe.setAttribute('referrerpolicy', 'no-referrer');
-    
-    applyScaleToIframe(iframe);
-    
-    iframe.onload = function() {
-        setTimeout(() => {
-            const loading = browserContent.querySelector('.loading');
-            if (loading) {
-                loading.remove();
-            }
-            iframe.classList.add('loaded');
-            browserContent.classList.add('has-iframe');
-            iframeLoaded = true;
-            generateBtn.disabled = false;
-            generateBtn.textContent = '生成截图';
-            initializeResizeHandle();
-        }, 500);
-    };
-
-    iframe.onerror = function() {
+    try {
+        const proxyUrl = getProxyUrl(url);
+        const response = await fetch(proxyUrl);
+        const html = await response.text();
+        
+        browserContent.innerHTML = `
+            <div class="page-content" id="pageContent">
+                ${html}
+            </div>
+            <div class="resize-handle" id="resizeHandle" title="拖拽调整显示范围">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+            </div>
+        `;
+        
+        const pageContent = document.getElementById('pageContent');
+        applyScaleToContent(pageContent);
+        
+        iframeLoaded = true;
+        generateBtn.disabled = false;
+        generateBtn.textContent = '生成截图';
+        browserContent.classList.add('has-iframe');
+        initializeResizeHandle();
+        
+    } catch (error) {
+        console.error('加载失败:', error);
         showError('无法加载该页面。可能是因为该网站禁止了 iframe 嵌入。');
         generateBtn.disabled = false;
         generateBtn.textContent = '生成截图';
-    };
-
-    browserContent.appendChild(iframe);
-    iframe.src = proxyUrl;
-
-    setTimeout(() => {
-        if (!iframeLoaded && browserContent.querySelector('.loading')) {
-            const loading = browserContent.querySelector('.loading');
-            if (loading) {
-                loading.remove();
-            }
-            iframe.classList.add('loaded');
-            iframeLoaded = true;
-            generateBtn.disabled = false;
-            generateBtn.textContent = '生成截图';
-        }
-    }, 5000);
+    }
 }
 
 function showError(message) {
@@ -141,26 +129,26 @@ function isValidUrl(string) {
     }
 }
 
-function applyScaleToIframe(iframe) {
+function applyScaleToContent(content) {
     if (customWidth) {
-        iframe.style.width = customWidth + 'px';
+        content.style.width = customWidth + 'px';
     } else {
-        iframe.style.width = '100%';
+        content.style.width = '100%';
     }
     
     if (customHeight) {
-        iframe.style.height = customHeight + 'px';
+        content.style.height = customHeight + 'px';
     } else {
-        iframe.style.height = '600px';
+        content.style.height = '600px';
     }
     
-    iframe.style.transform = `scale(${currentScale / 100})`;
-    iframe.style.transformOrigin = 'top left';
+    content.style.transform = `scale(${currentScale / 100})`;
+    content.style.transformOrigin = 'top left';
     
     if (currentScale !== 100) {
         const scale = currentScale / 100;
-        iframe.style.width = customWidth ? (customWidth / scale) + 'px' : (100 / scale) + '%';
-        iframe.style.height = customHeight ? (customHeight / scale) + 'px' : (600 / scale) + 'px';
+        content.style.width = customWidth ? (customWidth / scale) + 'px' : (100 / scale) + '%';
+        content.style.height = customHeight ? (customHeight / scale) + 'px' : (600 / scale) + 'px';
     }
 }
 
@@ -171,9 +159,9 @@ function applyCustomScale() {
     customWidth = widthInput.value ? parseInt(widthInput.value) : null;
     customHeight = heightInput.value ? parseInt(heightInput.value) : null;
     
-    const iframe = document.querySelector('#browserContent iframe');
-    if (iframe) {
-        applyScaleToIframe(iframe);
+    const pageContent = document.querySelector('#browserContent .page-content');
+    if (pageContent) {
+        applyScaleToContent(pageContent);
     }
     
     alert('尺寸已应用！');
@@ -189,9 +177,9 @@ function resetScale() {
     document.getElementById('customWidth').value = '';
     document.getElementById('customHeight').value = '';
     
-    const iframe = document.querySelector('#browserContent iframe');
-    if (iframe) {
-        applyScaleToIframe(iframe);
+    const pageContent = document.querySelector('#browserContent .page-content');
+    if (pageContent) {
+        applyScaleToContent(pageContent);
     }
     
     alert('已重置为默认设置！');
@@ -211,14 +199,14 @@ function applyBackgroundType() {
 function initializeResizeHandle() {
     const resizeHandle = document.getElementById('resizeHandle');
     const browserContent = document.getElementById('browserContent');
-    const iframe = browserContent.querySelector('iframe');
+    const pageContent = browserContent.querySelector('.page-content');
     
-    if (!resizeHandle || !iframe) return;
+    if (!resizeHandle || !pageContent) return;
     
     resizeHandle.addEventListener('mousedown', function(e) {
         isResizing = true;
         startY = e.clientY;
-        startHeight = iframe.offsetHeight;
+        startHeight = pageContent.offsetHeight;
         resizeHandle.classList.add('active');
         document.body.style.userSelect = 'none';
         document.body.style.cursor = 'ns-resize';
@@ -230,7 +218,7 @@ function initializeResizeHandle() {
         const deltaY = e.clientY - startY;
         const newHeight = Math.max(200, startHeight + deltaY);
         
-        iframe.style.height = newHeight + 'px';
+        pageContent.style.height = newHeight + 'px';
         customHeight = newHeight;
         document.getElementById('customHeight').value = newHeight;
     });
@@ -279,14 +267,13 @@ async function downloadScreenshot() {
             imageTimeout: 15000,
             foreignObjectRendering: true,
             onclone: (clonedDoc) => {
-                const clonedIframe = clonedDoc.querySelector('iframe');
-                if (clonedIframe) {
-                    clonedIframe.style.opacity = '1';
-                    clonedIframe.style.visibility = 'visible';
-                    clonedIframe.style.transform = 'none';
-                    clonedIframe.style.width = customWidth ? customWidth + 'px' : '100%';
-                    clonedIframe.style.height = customHeight ? customHeight + 'px' : '600px';
-                    clonedIframe.style.position = 'relative';
+                const clonedPageContent = clonedDoc.querySelector('.page-content');
+                if (clonedPageContent) {
+                    clonedPageContent.style.transform = 'none';
+                    clonedPageContent.style.width = customWidth ? customWidth + 'px' : '100%';
+                    clonedPageContent.style.height = customHeight ? customHeight + 'px' : '600px';
+                    clonedPageContent.style.position = 'relative';
+                    clonedPageContent.style.overflow = 'hidden';
                 }
                 
                 const clonedResizeHandle = clonedDoc.querySelector('.resize-handle');
@@ -359,9 +346,9 @@ function initializeEventListeners() {
         currentScale = parseInt(e.target.value);
         document.getElementById('scalePercentValue').textContent = currentScale + '%';
         
-        const iframe = document.querySelector('#browserContent iframe');
-        if (iframe) {
-            applyScaleToIframe(iframe);
+        const pageContent = document.querySelector('#browserContent .page-content');
+        if (pageContent) {
+            applyScaleToContent(pageContent);
         }
     });
 
